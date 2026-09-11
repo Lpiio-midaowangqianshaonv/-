@@ -1,0 +1,579 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="theme-color" content="#0f766e">
+    <meta name="description" content="私密的房源记录与客户分析工具，数据仅保存在本机浏览器中。">
+    <link rel="manifest" href="./manifest.json">
+    <title>房源记录与客户分析</title>
+    <style>
+      :root { color-scheme: light; font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif; background: #f3f7f6; color: #173530; }
+      * { box-sizing: border-box; }
+      body { margin: 0; min-width: 320px; }
+      button, input, select, textarea { font: inherit; }
+      button { cursor: pointer; }
+      .entry-app { min-height: 100vh; padding: max(16px, env(safe-area-inset-top)) 16px calc(152px + env(safe-area-inset-bottom)); }
+      .entry-header { margin: 4px 4px 18px; }
+      .entry-header h1 { margin: 0; font-size: 24px; line-height: 1.3; letter-spacing: .02em; }
+      .entry-header p { margin: 7px 0 0; color: #647a74; font-size: 13px; }
+      .entry-form, .analysis-card { background: #fff; border: 1px solid #dce9e5; border-radius: 18px; box-shadow: 0 4px 18px rgba(18, 76, 64, .06); }
+      .entry-form { padding: 16px; }
+      .form-section + .form-section { border-top: 1px solid #ebf1ef; margin-top: 19px; padding-top: 18px; }
+      .section-title { margin: 0 0 12px; font-size: 16px; }
+      .field-grid { display: grid; gap: 12px; }
+      .field-grid.two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .field { display: grid; gap: 6px; }
+      .field.full { grid-column: 1 / -1; }
+      label { color: #38544d; font-size: 13px; font-weight: 650; }
+      .required { color: #d95b50; margin-left: 2px; }
+      input, select, textarea { width: 100%; min-height: 46px; border: 1px solid #cbded8; border-radius: 11px; background: #fff; padding: 10px 11px; color: #173530; outline: none; }
+      textarea { min-height: 80px; resize: vertical; line-height: 1.5; }
+      input:focus, select:focus, textarea:focus { border-color: #0f897b; box-shadow: 0 0 0 3px rgba(15, 137, 123, .13); }
+      .media-actions { display: flex; gap: 10px; }
+      .media-actions button { flex: 1; min-height: 46px; border-radius: 12px; border: 1px dashed #70aa9f; background: #f1faf7; color: #086c60; font-weight: 700; }
+      .media-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-top: 12px; }
+      .media-card { position: relative; overflow: hidden; aspect-ratio: 4 / 3; border: 1px solid #d8e7e2; border-radius: 12px; background: #e8f0ee; }
+      .media-card img, .media-card video { width: 100%; height: 100%; object-fit: cover; display: block; }
+      .remove-media { position: absolute; top: 7px; right: 7px; width: 30px; height: 30px; padding: 0; border: 0; border-radius: 50%; background: rgba(20, 43, 38, .78); color: #fff; font-size: 20px; line-height: 1; }
+      .hint { margin: 9px 0 0; color: #6a817a; font-size: 12px; line-height: 1.55; }
+      .analysis-card { margin-top: 16px; padding: 15px; border-color: #9bcfc4; background: linear-gradient(145deg, #f1fbf8, #fff); }
+      .analysis-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+      .analysis-head h2 { margin: 0; font-size: 17px; }
+      .score { display: grid; place-items: center; width: 56px; height: 56px; flex: 0 0 auto; border-radius: 50%; background: #0f766e; color: #fff; font-weight: 800; font-size: 18px; }
+      .analysis-card p { margin: 12px 0 0; font-size: 14px; line-height: 1.6; }
+      .analysis-card strong { color: #0b665b; }
+      .analysis-tags { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 9px; }
+      .analysis-tags span { background: #d8f0e9; color: #086c60; padding: 5px 9px; border-radius: 999px; font-size: 12px; }
+      .score-detail { margin: 12px 0 0; color: #607871; font-size: 12px; }
+      .form-error, .form-success { margin: 14px 1px 0; padding: 10px 12px; border-radius: 10px; font-size: 13px; }
+      .form-error { background: #fff0ed; color: #a83d31; }
+      .form-success { background: #e6f7ef; color: #166b4a; }
+      .sticky-actions { position: fixed; z-index: 5; right: 0; bottom: 62px; left: 0; display: flex; gap: 10px; padding: 12px 16px; background: rgba(243,247,246,.94); backdrop-filter: blur(10px); border-top: 1px solid #dce9e5; }
+      .sticky-actions button { min-height: 48px; border-radius: 13px; font-weight: 750; }
+      .analyse-button { flex: .9; border: 1px solid #58a99b; background: #fff; color: #087365; }
+      .save-button { flex: 1.1; border: 0; background: #0f766e; color: #fff; box-shadow: 0 5px 12px rgba(15,118,110,.2); }
+      .save-button:disabled { opacity: .58; cursor: wait; }
+      .app-topbar { display:flex; align-items:center; justify-content:space-between; gap:10px; margin:4px 4px 18px; }
+      .app-topbar h1 { margin:0; font-size:23px; }
+      .icon-button, .text-button { border:1px solid #bcd8d1; background:#fff; color:#086c60; min-height:40px; padding:0 12px; border-radius:11px; font-weight:700; }
+      .tabbar { position:fixed; z-index:8; bottom:0; left:0; right:0; display:flex; background:rgba(255,255,255,.97); border-top:1px solid #dce9e5; padding:8px 16px max(8px, env(safe-area-inset-bottom)); }
+      .tabbar button { flex:1; border:0; background:transparent; padding:8px; color:#668078; font-size:13px; font-weight:700; }
+      .tabbar button.active { color:#087365; }
+      .list-page, .detail-page, .settings-page { min-height:100vh; padding:max(16px, env(safe-area-inset-top)) 16px calc(82px + env(safe-area-inset-bottom)); }
+      .filter-panel, .listing-card, .detail-card, .settings-card { background:#fff; border:1px solid #dce9e5; border-radius:17px; box-shadow:0 4px 18px rgba(18,76,64,.06); }
+      .filter-panel { padding:14px; display:grid; gap:10px; }
+      .filter-grid { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+      .rent-row { display:flex; align-items:center; gap:7px; } .rent-row input { min-width:0; }
+      .listing-list { display:grid; gap:12px; margin-top:15px; }
+      .listing-card { width:100%; text-align:left; padding:15px; color:inherit; }
+      .listing-card h2 { margin:0; font-size:17px; } .listing-meta { margin:8px 0 0; display:flex; flex-wrap:wrap; gap:7px; color:#547069; font-size:13px; }
+      .chip { display:inline-block; padding:4px 8px; border-radius:999px; background:#e7f5f0; color:#087365; font-size:12px; }
+      .empty-state { text-align:center; padding:42px 18px; color:#668078; }
+      .detail-card, .settings-card { padding:16px; } .detail-card + .detail-card { margin-top:13px; }
+      .detail-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }
+      .detail-item { padding:10px; border-radius:11px; background:#f4f9f7; } .detail-item dt { font-size:12px; color:#6b817a; } .detail-item dd { margin:5px 0 0; font-size:14px; word-break:break-word; }
+      .detail-text { white-space:pre-wrap; line-height:1.6; margin:7px 0 0; }
+      .detail-media { margin-top:12px; display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; } .detail-media img,.detail-media video { width:100%; aspect-ratio:4/3; object-fit:cover; display:block; border-radius:11px; background:#e8f0ee; }
+      .primary-button { min-height:46px; border:0; border-radius:12px; padding:0 15px; background:#0f766e; color:#fff; font-weight:750; } .secondary-button { min-height:46px; border:1px solid #58a99b; border-radius:12px; padding:0 15px; background:#fff; color:#087365; font-weight:750; }
+      .button-row { display:flex; gap:10px; flex-wrap:wrap; } .button-row > * { flex:1; }
+      .modal-backdrop { position:fixed; z-index:20; inset:0; display:grid; align-items:end; background:rgba(13,33,29,.48); }
+      .modal { width:100%; max-height:88vh; padding:16px; border-radius:22px 22px 0 0; overflow:auto; background:#fff; }
+      #amap-container { width:100%; height:55vh; min-height:300px; margin-top:12px; border-radius:13px; overflow:hidden; background:#edf4f2; }
+      /* 黑白主题：仅覆盖视觉层，不影响任何业务行为。 */
+      :root { --mono-ink:#111; --mono-muted:#666; --mono-line:#d4d4d4; --mono-soft:#f4f4f4; --mono-paper:#fff; }
+      body, .entry-app { color:var(--mono-ink); background:var(--mono-soft); }
+      .entry-form, .analysis-card, .filter-panel, .listing-card, .detail-card, .settings-card, .modal { background:var(--mono-paper); border-color:var(--mono-line); box-shadow:none; }
+      .form-section + .form-section, .sticky-actions, .tabbar { border-color:var(--mono-line); }
+      label, .hint, .score-detail, .listing-meta, .empty-state, .detail-item dt, .tabbar button { color:var(--mono-muted); }
+      input, select, textarea { color:var(--mono-ink); border-color:#bdbdbd; background:var(--mono-paper); }
+      input:focus, select:focus, textarea:focus { border-color:var(--mono-ink); box-shadow:0 0 0 3px rgba(0,0,0,.12); }
+      .media-actions button, .analyse-button, .secondary-button, .icon-button, .text-button { color:var(--mono-ink); border-color:var(--mono-ink); background:var(--mono-paper); }
+      .media-card, .detail-item, .detail-media img, .detail-media video, #amap-container { background:#e9e9e9; border-color:var(--mono-line); }
+      .analysis-card { background:var(--mono-paper); } .analysis-card strong { color:var(--mono-ink); }
+      .score, .save-button, .primary-button { background:var(--mono-ink); color:var(--mono-paper); box-shadow:none; }
+      .analysis-tags span, .chip { background:#e8e8e8; color:var(--mono-ink); }
+      .remove-media, .modal-backdrop { background:rgba(0,0,0,.78); }
+      .form-error { background:#f1f1f1; color:var(--mono-ink); border:1px solid #aaa; }
+      .form-success { background:#ebebeb; color:var(--mono-ink); border:1px solid #aaa; }
+      .tabbar button.active { color:var(--mono-ink); text-decoration:underline; text-underline-offset:4px; }
+      @media (min-width: 620px) { .entry-app { max-width: 620px; margin: 0 auto; } }
+    </style>
+  </head>
+  <body>
+    <!-- Vue 应用将在后续任务挂载到这里。 -->
+    <div id="app"></div>
+
+    <!-- Vue 仅用于界面层；房源数据始终留在本机 IndexedDB。 -->
+    <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+    <script>
+      // 更新缓存时同步更新此版本号，便于后续维护。
+      window.__APP_VERSION__ = '1.0.0';
+
+      // PWA 仅在安全上下文（HTTPS 或 localhost）中可以注册 Service Worker。
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+          navigator.serviceWorker.register('./sw.js').catch((error) => {
+            console.warn('Service Worker 注册失败：', error);
+          });
+        });
+      }
+
+      // 浏览器控制台最小烟雾检查：保证应用挂载点和主题色元数据存在。
+      console.assert(document.querySelector('#app'), 'app mount point is missing');
+      console.assert(document.querySelector('meta[name="theme-color"]'), 'theme color is missing');
+
+      /**
+       * 房源规范对象。媒体 Blob 不嵌入 listings 表，而是由 mediaIds 引用，
+       * 避免每次更新文字字段时复制大文件。
+       */
+      const LISTING_FIELDS = Object.freeze([
+        'communityName', 'address', 'area', 'layout', 'rent', 'floor',
+        'orientation', 'decoration', 'ownerBottomPrice', 'advantages',
+        'disadvantages', 'notes'
+      ]);
+
+      function createId() {
+        return globalThis.crypto?.randomUUID?.()
+          || `listing-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+      }
+
+      function normalizeListing(input = {}) {
+        const listing = {
+          id: String(input.id || createId()),
+          communityName: String(input.communityName || '').trim(),
+          address: String(input.address || '').trim(),
+          area: Number(input.area) || 0,
+          layout: String(input.layout || '').trim(),
+          rent: Number(input.rent) || 0,
+          floor: String(input.floor || '').trim(),
+          orientation: String(input.orientation || '').trim(),
+          decoration: String(input.decoration || '').trim(),
+          ownerBottomPrice: Number(input.ownerBottomPrice) || 0,
+          advantages: String(input.advantages || '').trim(),
+          disadvantages: String(input.disadvantages || '').trim(),
+          notes: String(input.notes || '').trim(),
+          analysis: input.analysis && typeof input.analysis === 'object'
+            ? structuredClone(input.analysis) : null,
+          mediaIds: Array.isArray(input.mediaIds)
+            ? input.mediaIds.map(String) : [],
+          createdAt: input.createdAt || new Date().toISOString(),
+          updatedAt: new Date().toISOString()
+        };
+        return listing;
+      }
+
+      function statedFloorScore(floor) {
+        const values = String(floor || '').match(/\d+(?:\.\d+)?/g);
+        if (!values?.length) return { points: 0, label: '楼层未填写：+0' };
+        const current = Number(values[0]);
+        const total = Number(values[1]);
+        const isMiddle = total > 0
+          ? current / total >= 1 / 3 && current / total <= 2 / 3
+          : false;
+        return isMiddle
+          ? { points: 8, label: '中间楼层：+8' }
+          : { points: 4, label: '已填写其他楼层：+4' };
+      }
+
+      /**
+       * 纯函数：可在保存前反复调用。评分从 45 分开始，每个分项均返回，
+       * 让中介可以清楚理解最终得分的来源。
+       */
+      function analyzeListing(listing = {}) {
+        const decoration = String(listing.decoration || '').trim();
+        const orientation = String(listing.orientation || '').trim();
+        const address = String(listing.address || '');
+        const area = Number(listing.area) || 0;
+        const hasArea = area > 0;
+        const clients = [];
+        const scoreDetails = [{ label: '基础分', points: 45 }];
+        const decorationPoints = { '精装': 20, '简装': 10, '老旧': 2 }[decoration] || 0;
+        scoreDetails.push({ label: `装修（${decoration || '未填写'}）`, points: decorationPoints });
+
+        const orientationPoints = (orientation === '南' || orientation === '东南') ? 15 : 0;
+        scoreDetails.push({ label: `朝向（${orientation || '未填写'}）`, points: orientationPoints });
+
+        const floor = statedFloorScore(listing.floor);
+        scoreDetails.push(floor);
+
+        const areaPoints = hasArea ? (area >= 40 && area <= 90 ? 8 : 4) : 0;
+        scoreDetails.push({ label: `面积（${area || '未填写'}㎡）`, points: areaPoints });
+
+        if (decoration === '精装' && (orientation === '南' || orientation === '东南')) {
+          clients.push('追求品质的白领/情侣');
+        }
+        if (decoration === '简装' && hasArea && area < 40) {
+          clients.push('预算有限的毕业生/单身人士');
+        }
+        if (decoration === '老旧' && area > 70) {
+          clients.push('想低价改造的年轻家庭/投资客');
+        }
+        if (!clients.length) clients.push('需求明确的租客');
+
+        const areaNote = /石厦|益田/.test(address)
+          ? '石厦片区，适合福田CBD上班族/陪读家庭'
+          : '';
+        const score = Math.max(0, Math.min(100,
+          scoreDetails.reduce((sum, item) => sum + item.points, 0)));
+        const highlights = [];
+        if (decoration === '精装') highlights.push('精装省心入住');
+        if (orientation === '南' || orientation === '东南') highlights.push('采光朝向佳');
+        if (area > 0) highlights.push(`${area}㎡空间利用灵活`);
+        const advice = `${highlights.length ? highlights.join('，') : '按客户实际需求灵活推荐'}，重点推荐给${clients[0]}。`;
+
+        return { score, clients, advice, areaNote, scoreDetails };
+      }
+
+      /** IndexedDB 仓库：不含网络请求，所有图片/视频 Blob 均只保存在本机。 */
+      const db = (() => {
+        const DB_NAME = 'property-record-local';
+        const DB_VERSION = 1;
+        let databasePromise;
+
+        function open() {
+          if (databasePromise) return databasePromise;
+          databasePromise = new Promise((resolve, reject) => {
+            const request = indexedDB.open(DB_NAME, DB_VERSION);
+            request.onupgradeneeded = () => {
+              const database = request.result;
+              if (!database.objectStoreNames.contains('listings')) {
+                database.createObjectStore('listings', { keyPath: 'id' });
+              }
+              if (!database.objectStoreNames.contains('media')) {
+                const media = database.createObjectStore('media', { keyPath: 'id' });
+                media.createIndex('listingId', 'listingId', { unique: false });
+              }
+            };
+            request.onsuccess = () => resolve(request.result);
+            request.onerror = () => reject(request.error || new Error('无法打开本地数据库'));
+          });
+          return databasePromise;
+        }
+
+        async function run(storeNames, mode, operation) {
+          const database = await open();
+          return new Promise((resolve, reject) => {
+            const transaction = database.transaction(storeNames, mode);
+            const result = operation(transaction);
+            transaction.oncomplete = () => resolve(result);
+            transaction.onerror = () => reject(transaction.error || new Error('本地数据库操作失败'));
+            transaction.onabort = () => reject(transaction.error || new Error('本地数据库操作已取消'));
+          });
+        }
+
+        return {
+          async saveListing(input) {
+            const listing = normalizeListing(input);
+            const incomingMedia = Array.isArray(input.media) ? input.media : [];
+            const mediaRecords = incomingMedia.map((item) => ({
+              id: String(item.id || createId()), listingId: listing.id,
+              kind: item.kind === 'video' ? 'video' : 'image',
+              name: String(item.name || ''), type: String(item.type || ''), blob: item.blob
+            }));
+            if (mediaRecords.some((item) => !(item.blob instanceof Blob))) {
+              throw new TypeError('媒体记录必须包含本地 Blob');
+            }
+            listing.mediaIds = [...new Set([...listing.mediaIds, ...mediaRecords.map((item) => item.id)])];
+            await run(['listings', 'media'], 'readwrite', (tx) => {
+              tx.objectStore('listings').put(listing);
+              mediaRecords.forEach((record) => tx.objectStore('media').put(record));
+            });
+            return structuredClone(listing);
+          },
+          async listListings() {
+            const database = await open();
+            return new Promise((resolve, reject) => {
+              const request = database.transaction('listings', 'readonly').objectStore('listings').getAll();
+              request.onsuccess = () => resolve(request.result.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)));
+              request.onerror = () => reject(request.error || new Error('读取房源列表失败'));
+            });
+          },
+          async getListing(id) {
+            const database = await open();
+            return new Promise((resolve, reject) => {
+              const tx = database.transaction(['listings', 'media'], 'readonly');
+              const listingRequest = tx.objectStore('listings').get(String(id));
+              listingRequest.onerror = () => reject(listingRequest.error || new Error('读取房源失败'));
+              listingRequest.onsuccess = () => {
+                const listing = listingRequest.result;
+                if (!listing) return resolve(null);
+                const mediaRequest = tx.objectStore('media').index('listingId').getAll(listing.id);
+                mediaRequest.onsuccess = () => resolve({ ...listing, media: mediaRequest.result });
+                mediaRequest.onerror = () => reject(mediaRequest.error || new Error('读取媒体失败'));
+              };
+            });
+          },
+          async listMedia() {
+            const database = await open();
+            return new Promise((resolve, reject) => {
+              const request = database.transaction('media', 'readonly').objectStore('media').getAll();
+              request.onsuccess = () => resolve(request.result);
+              request.onerror = () => reject(request.error || new Error('读取媒体失败'));
+            });
+          },
+          async deleteListing(id) {
+            const listingId = String(id);
+            await run(['listings', 'media'], 'readwrite', (tx) => {
+              tx.objectStore('listings').delete(listingId);
+              const index = tx.objectStore('media').index('listingId');
+              const cursor = index.openCursor(IDBKeyRange.only(listingId));
+              cursor.onsuccess = () => {
+                const current = cursor.result;
+                if (current) { current.delete(); current.continue(); }
+              };
+            });
+          }
+        };
+      })();
+
+      // Expose the deliberately small data-layer API for later Vue components and manual diagnostics.
+      window.analyzeListing = analyzeListing;
+      window.db = db;
+      window.createEmptyListing = () => normalizeListing({});
+      window.Vue = window.Vue;
+
+      // Console smoke assertions; IndexedDB persistence needs a browser-origin runtime to exercise.
+      const analysisSmoke = analyzeListing({ decoration: '精装', orientation: '南', area: 55, floor: '12/28', address: '石厦路' });
+      console.assert(analysisSmoke.clients.includes('追求品质'), 'south-facing fine decoration should match quality clients');
+      console.assert(analysisSmoke.areaNote.includes('石厦片区'), 'Shixia address should produce area note');
+      console.assert(analysisSmoke.score === 96, 'transparent scoring should total 96 for the smoke listing');
+      console.assert(
+        !analyzeListing({ decoration: '简装', area: '' }).clients.includes('预算有限'),
+        'missing area must not match small-area budget clients'
+      );
+      console.assert(typeof db.saveListing === 'function' && typeof db.deleteListing === 'function', 'IndexedDB repository API is missing');
+
+      /**
+       * 录入页：媒体 File 只会转为用于预览的 Object URL，保存时原始 Blob 进入 IndexedDB。
+       * 不发送 fetch/XHR 请求，因此照片与视频不会上传到服务器。
+       */
+      const PropertyEntryApp = {
+        emits: ['saved'],
+        setup(_, { emit }) {
+          const { reactive, ref, computed, onBeforeUnmount } = Vue;
+          const form = reactive({
+            communityName: '', address: '', area: '', layout: '', rent: '', floor: '',
+            orientation: '', decoration: '', ownerBottomPrice: '', advantages: '',
+            disadvantages: '', notes: ''
+          });
+          // 一次录入会话对应一个稳定 ID；重复点击保存只更新该房源，不会把媒体重绑到新记录。
+          const listingId = ref(createId());
+          const createdAt = new Date().toISOString();
+          const media = ref([]);
+          const analysis = ref(null);
+          const errorMessage = ref('');
+          const successMessage = ref('');
+          const saving = ref(false);
+          const imageInput = ref(null);
+          const videoInput = ref(null);
+          const hasAnalysis = computed(() => analysis.value !== null);
+
+          function clearMessages() { errorMessage.value = ''; successMessage.value = ''; }
+          function addMedia(event, kind) {
+            const files = [...(event.target.files || [])];
+            files.forEach((file) => {
+              if (!file.type.startsWith(`${kind}/`)) return;
+              media.value.push({ id: createId(), kind, name: file.name, type: file.type, blob: file, previewUrl: URL.createObjectURL(file) });
+            });
+            event.target.value = '';
+          }
+          function removeMedia(id) {
+            const index = media.value.findIndex((item) => item.id === id);
+            if (index < 0) return;
+            URL.revokeObjectURL(media.value[index].previewUrl);
+            media.value.splice(index, 1);
+          }
+          function runAnalysis() {
+            analysis.value = analyzeListing(form);
+            clearMessages();
+          }
+          function validate() {
+            if (!form.communityName.trim()) return '请填写小区名称。';
+            if (!form.layout.trim()) return '请填写户型，例如 1室1厅。';
+            if (!(Number(form.rent) > 0)) return '请填写有效的月租金。';
+            if (!form.decoration) return '请选择装修情况。';
+            return '';
+          }
+          async function save() {
+            clearMessages();
+            const validationError = validate();
+            if (validationError) { errorMessage.value = validationError; return; }
+            saving.value = true;
+            try {
+              // 保存前重新计算，保证持久化的结果与当前表单内容一致。
+              const currentAnalysis = analyzeListing(form);
+              await db.saveListing({ id: listingId.value, createdAt, ...form, analysis: currentAnalysis, media: media.value.map(({ id, kind, name, type, blob }) => ({ id, kind, name, type, blob })) });
+              analysis.value = currentAnalysis;
+              successMessage.value = '房源已安全保存到本机浏览器。';
+              emit('saved');
+            } catch (error) {
+              console.error(error);
+              errorMessage.value = '保存失败，请检查浏览器是否允许本地存储，或清理部分空间后重试。';
+            } finally { saving.value = false; }
+          }
+          onBeforeUnmount(() => media.value.forEach((item) => URL.revokeObjectURL(item.previewUrl)));
+          return { form, media, analysis, errorMessage, successMessage, saving, imageInput, videoInput, hasAnalysis, addMedia, removeMedia, runAnalysis, save };
+        },
+        template: `
+          <main class="entry-app">
+            <header class="entry-header"><h1>房源录入</h1><p>资料与媒体仅保存在当前手机浏览器。</p></header>
+            <form class="entry-form" @submit.prevent="save">
+              <section class="form-section"><h2 class="section-title">基础信息</h2><div class="field-grid two">
+                <div class="field full"><label>小区名称<span class="required">*</span></label><input v-model="form.communityName" autocomplete="organization" placeholder="例如：石厦新天世纪" /></div>
+                <div class="field full"><label>具体地址</label><input v-model="form.address" autocomplete="street-address" placeholder="例如：福田区石厦北二街" /></div>
+                <div class="field"><label>面积（㎡）</label><input v-model="form.area" inputmode="decimal" type="number" min="0" placeholder="例如：58" /></div>
+                <div class="field"><label>户型<span class="required">*</span></label><input v-model="form.layout" placeholder="例如：2室1厅" /></div>
+                <div class="field"><label>租金（元/月）<span class="required">*</span></label><input v-model="form.rent" inputmode="numeric" type="number" min="0" placeholder="例如：6800" /></div>
+                <div class="field"><label>楼层</label><input v-model="form.floor" placeholder="例如：12/28" /></div>
+                <div class="field"><label>朝向</label><select v-model="form.orientation"><option value="">请选择</option><option>南</option><option>东南</option><option>东</option><option>西南</option><option>西</option><option>北</option><option>南北</option></select></div>
+                <div class="field"><label>装修情况<span class="required">*</span></label><select v-model="form.decoration"><option value="">请选择</option><option>精装</option><option>简装</option><option>老旧</option></select></div>
+                <div class="field full"><label>业主心理底价（元/月）</label><input v-model="form.ownerBottomPrice" inputmode="numeric" type="number" min="0" placeholder="仅自己可见，便于议价" /></div>
+              </div></section>
+              <section class="form-section"><h2 class="section-title">房源判断</h2><div class="field-grid">
+                <div class="field"><label>卖点</label><textarea v-model="form.advantages" placeholder="采光、交通、配置、学位等"></textarea></div>
+                <div class="field"><label>缺点</label><textarea v-model="form.disadvantages" placeholder="如实记录噪音、楼龄、采光遮挡等"></textarea></div>
+                <div class="field"><label>备注</label><textarea v-model="form.notes" placeholder="跟进情况、钥匙、看房限制等"></textarea></div>
+              </div></section>
+              <section class="form-section"><h2 class="section-title">现场媒体</h2>
+                <div class="media-actions"><button type="button" @click="imageInput.click()">📷 拍照</button><button type="button" @click="videoInput.click()">🎥 录视频</button></div>
+                <input ref="imageInput" hidden type="file" accept="image/*" capture="environment" @change="addMedia($event, 'image')" />
+                <input ref="videoInput" hidden type="file" accept="video/*" capture="environment" @change="addMedia($event, 'video')" />
+                <div v-if="media.length" class="media-list"><article v-for="item in media" :key="item.id" class="media-card"><img v-if="item.kind === 'image'" :src="item.previewUrl" :alt="item.name || '房源照片'" /><video v-else :src="item.previewUrl" controls playsinline></video><button class="remove-media" type="button" :aria-label="'删除' + (item.kind === 'image' ? '照片' : '视频')" @click="removeMedia(item.id)">×</button></article></div>
+                <p class="hint">拍摄的照片和视频只存到本机浏览器的本地数据库，不会上传。</p>
+              </section>
+              <p v-if="errorMessage" class="form-error" role="alert">{{ errorMessage }}</p><p v-if="successMessage" class="form-success" role="status">{{ successMessage }}</p>
+            </form>
+            <section v-if="hasAnalysis" class="analysis-card" aria-live="polite"><div class="analysis-head"><h2>智能分析结果</h2><span class="score">{{ analysis.score }}</span></div><p><strong>推荐客户：</strong></p><div class="analysis-tags"><span v-for="client in analysis.clients" :key="client">{{ client }}</span></div><p v-if="analysis.areaNote"><strong>片区提示：</strong>{{ analysis.areaNote }}</p><p><strong>一句话卖点：</strong>{{ analysis.advice }}</p><p class="score-detail">评分构成：{{ analysis.scoreDetails.map(item => item.label + ' ' + (item.points >= 0 ? '+' : '') + item.points).join('｜') }}</p></section>
+            <footer class="sticky-actions"><button type="button" class="analyse-button" @click="runAnalysis">智能分析</button><button type="button" class="save-button" :disabled="saving" @click="save">{{ saving ? '保存中…' : '保存房源' }}</button></footer>
+          </main>`
+      };
+
+      // FileReader 用于导出：只在用户点击“导出 JSON”后将本地 Blob 转成 Base64，绝不上传。
+      function blobToDataUrl(blob) {
+        return new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(reader.result);
+          reader.onerror = () => reject(reader.error || new Error('媒体导出失败'));
+          reader.readAsDataURL(blob);
+        });
+      }
+
+      const PropertyToolApp = {
+        components: { PropertyEntryApp },
+        setup() {
+          const { ref, computed, nextTick, onBeforeUnmount } = Vue;
+          const page = ref('entry');
+          const listings = ref([]);
+          const selected = ref(null);
+          const filters = ref({ layout: '', decoration: '', rentMin: '', rentMax: '' });
+          const loading = ref(false);
+          const notice = ref('');
+          const amapKey = ref(localStorage.getItem('property-amap-key') || '');
+          const mapOpen = ref(false);
+          let mapInstance = null;
+          let mapScriptPromise = null;
+          const mediaUrls = new Map();
+
+          const filteredListings = computed(() => listings.value.filter((item) => {
+            const min = Number(filters.value.rentMin); const max = Number(filters.value.rentMax);
+            return (!filters.value.layout || item.layout === filters.value.layout)
+              && (!filters.value.decoration || item.decoration === filters.value.decoration)
+              && (!(min > 0) || item.rent >= min) && (!(max > 0) || item.rent <= max);
+          }));
+          const layouts = computed(() => [...new Set(listings.value.map((item) => item.layout).filter(Boolean))]);
+          function mediaUrl(record) {
+            if (!record?.blob) return '';
+            if (!mediaUrls.has(record.id)) mediaUrls.set(record.id, URL.createObjectURL(record.blob));
+            return mediaUrls.get(record.id);
+          }
+          // 将 IndexedDB 中的原始 Blob 下载回设备；不会经过网络。
+          function downloadMedia(record) {
+            if (!record?.blob) return;
+            const url = URL.createObjectURL(record.blob);
+            const extension = record.type?.split('/')[1] || (record.kind === 'video' ? 'mp4' : 'jpg');
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = record.name || `房源${record.kind === 'video' ? '视频' : '照片'}-${Date.now()}.${extension}`;
+            document.body.appendChild(link); link.click(); link.remove();
+            setTimeout(() => URL.revokeObjectURL(url), 1000);
+          }
+          async function refreshListings() {
+            loading.value = true;
+            try { listings.value = await db.listListings(); }
+            catch (error) { console.error(error); notice.value = '无法读取本机房源数据。'; }
+            finally { loading.value = false; }
+          }
+          async function showDetail(id) {
+            try { selected.value = await db.getListing(id); page.value = 'detail'; }
+            catch (error) { console.error(error); notice.value = '无法打开该房源详情。'; }
+          }
+          function changePage(nextPage) { page.value = nextPage; if (nextPage === 'list') refreshListings(); }
+          function saveAmapKey() { localStorage.setItem('property-amap-key', amapKey.value.trim()); notice.value = '高德 Key 已仅保存在此浏览器。'; }
+          function mapTarget() { return selected.value?.address?.trim() || '深圳市福田区石厦片区'; }
+          function openPublicMap() {
+            const target = encodeURIComponent(mapTarget());
+            window.open(`https://ditu.amap.com/search?query=${target}`, '_blank', 'noopener');
+          }
+          function loadAmap(key) {
+            if (window.AMap) return Promise.resolve(window.AMap);
+            if (mapScriptPromise) return mapScriptPromise;
+            mapScriptPromise = new Promise((resolve, reject) => {
+              const script = document.createElement('script');
+              script.src = `https://webapi.amap.com/maps?v=2.0&key=${encodeURIComponent(key)}`;
+              script.async = true; script.onload = () => resolve(window.AMap); script.onerror = () => reject(new Error('高德地图脚本加载失败'));
+              document.head.appendChild(script);
+            });
+            return mapScriptPromise;
+          }
+          async function openMap() {
+            if (!amapKey.value.trim()) { openPublicMap(); return; }
+            mapOpen.value = true;
+            await nextTick();
+            try {
+              const AMap = await loadAmap(amapKey.value.trim());
+              if (mapInstance) { mapInstance.destroy(); mapInstance = null; }
+              mapInstance = new AMap.Map('amap-container', { zoom: 14, center: [114.0472, 22.5294] });
+              const target = mapTarget();
+              AMap.plugin('AMap.Geocoder', () => {
+                const geocoder = new AMap.Geocoder({ city: '深圳' });
+                geocoder.getLocation(target, (status, result) => {
+                  const location = status === 'complete' && result.geocodes?.[0]?.location;
+                  const point = location || new AMap.LngLat(114.0472, 22.5294);
+                  mapInstance.setCenter(point); new AMap.Marker({ position: point, map: mapInstance, title: selected.value?.communityName || target });
+                  if (!location) notice.value = '未能精确解析地址，已显示石厦片区中心位置。';
+                });
+              });
+            } catch (error) { console.error(error); mapOpen.value = false; notice.value = '地图加载失败，已为您打开高德地图搜索。'; openPublicMap(); }
+          }
+          function closeMap() { if (mapInstance) { mapInstance.destroy(); mapInstance = null; } mapOpen.value = false; }
+          async function exportAll() {
+            try {
+              const [allListings, media] = await Promise.all([db.listListings(), db.listMedia()]);
+              const exportedMedia = await Promise.all(media.map(async (item) => ({ id:item.id, listingId:item.listingId, kind:item.kind, name:item.name, type:item.type, dataUrl:await blobToDataUrl(item.blob) })));
+              const payload = { format: 'property-record-backup', version: 1, exportedAt: new Date().toISOString(), listings: allListings, media: exportedMedia };
+              const url = URL.createObjectURL(new Blob([JSON.stringify(payload, null, 2)], { type:'application/json' }));
+              const link = document.createElement('a'); link.href = url; link.download = `房源备份-${new Date().toISOString().slice(0,10)}.json`; link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
+              notice.value = `已导出 ${allListings.length} 套房源（含本地媒体）。`;
+            } catch (error) { console.error(error); notice.value = '导出失败：请确认浏览器仍有足够本地存储空间。'; }
+          }
+          onBeforeUnmount(() => { mediaUrls.forEach((url) => URL.revokeObjectURL(url)); if (mapInstance) mapInstance.destroy(); });
+          refreshListings();
+          return { page, listings, selected, filters, loading, notice, amapKey, mapOpen, filteredListings, layouts, changePage, showDetail, refreshListings, saveAmapKey, openMap, closeMap, exportAll, mediaUrl, downloadMedia };
+        },
+        template: `
+          <property-entry-app v-if="page === 'entry'" @saved="refreshListings"></property-entry-app>
+          <main v-else-if="page === 'list'" class="list-page"><header class="app-topbar"><h1>房源列表</h1><button class="text-button" @click="refreshListings">刷新</button></header>
+            <section class="filter-panel" aria-label="筛选房源"><div class="filter-grid"><select v-model="filters.layout"><option value="">全部户型</option><option v-for="item in layouts" :key="item">{{ item }}</option></select><select v-model="filters.decoration"><option value="">全部装修</option><option>精装</option><option>简装</option><option>老旧</option></select></div><div class="rent-row"><input v-model="filters.rentMin" type="number" inputmode="numeric" min="0" placeholder="最低月租" /><span>至</span><input v-model="filters.rentMax" type="number" inputmode="numeric" min="0" placeholder="最高月租" /></div></section>
+            <p v-if="notice" class="form-success" role="status">{{ notice }}</p><section v-if="filteredListings.length" class="listing-list"><button v-for="item in filteredListings" :key="item.id" class="listing-card" @click="showDetail(item.id)"><h2>{{ item.communityName }}</h2><div class="listing-meta"><span>{{ item.layout || '户型未填' }}</span><strong>¥{{ Number(item.rent || 0).toLocaleString() }}/月</strong><span class="chip">{{ item.decoration || '装修未填' }}</span></div><div v-if="item.analysis?.clients?.length" class="listing-meta"><span class="chip">{{ item.analysis.clients.join('、') }}</span></div></button></section><div v-else class="empty-state">{{ loading ? '正在读取本机数据…' : '暂无匹配房源，去录入第一套吧。' }}</div>
+          </main>
+          <main v-else-if="page === 'detail'" class="detail-page"><header class="app-topbar"><button class="icon-button" @click="changePage('list')">‹ 返回</button><h1>房源详情</h1><span></span></header><template v-if="selected"><section class="detail-card"><h2 style="margin:0">{{ selected.communityName }}</h2><p class="hint">{{ selected.address || '未填写具体地址' }}</p><dl class="detail-grid"><div class="detail-item"><dt>户型</dt><dd>{{ selected.layout || '—' }}</dd></div><div class="detail-item"><dt>租金</dt><dd>¥{{ Number(selected.rent || 0).toLocaleString() }}/月</dd></div><div class="detail-item"><dt>面积</dt><dd>{{ selected.area || '—' }}㎡</dd></div><div class="detail-item"><dt>楼层 / 朝向</dt><dd>{{ selected.floor || '—' }} / {{ selected.orientation || '—' }}</dd></div><div class="detail-item"><dt>装修</dt><dd>{{ selected.decoration || '—' }}</dd></div><div class="detail-item"><dt>业主心理底价</dt><dd>{{ selected.ownerBottomPrice ? '¥' + Number(selected.ownerBottomPrice).toLocaleString() : '—' }}</dd></div></dl><div class="button-row" style="margin-top:14px"><button class="primary-button" @click="openMap">查看位置</button></div></section><section v-if="selected.analysis" class="detail-card"><h2 class="section-title">智能分析</h2><p><strong>综合评分：{{ selected.analysis.score }} 分</strong></p><p class="detail-text">推荐客户：{{ selected.analysis.clients?.join('、') || '—' }}</p><p v-if="selected.analysis.areaNote" class="detail-text">片区提示：{{ selected.analysis.areaNote }}</p><p class="detail-text">一句话卖点：{{ selected.analysis.advice }}</p></section><section class="detail-card"><h2 class="section-title">房源判断</h2><p class="detail-text"><strong>卖点：</strong>{{ selected.advantages || '—' }}</p><p class="detail-text"><strong>缺点：</strong>{{ selected.disadvantages || '—' }}</p><p class="detail-text"><strong>备注：</strong>{{ selected.notes || '—' }}</p><div v-if="selected.media?.length" class="detail-media"><template v-for="item in selected.media" :key="item.id"><img v-if="item.kind === 'image'" :src="mediaUrl(item)" :alt="item.name || '房源照片'" /><video v-else :src="mediaUrl(item)" controls playsinline></video><button class="secondary-button media-download" type="button" @click="downloadMedia(item)">保存{{ item.kind === 'video' ? '视频' : '照片' }}</button></template></div></section></template></main>
+          <main v-else class="settings-page"><header class="app-topbar"><h1>设置与备份</h1></header><section class="settings-card"><h2 class="section-title">高德地图 Key</h2><label>Web 端 JS API Key</label><input v-model="amapKey" autocomplete="off" placeholder="粘贴您申请的高德地图 Key" /><p class="hint">Key 只保存于当前浏览器。未填 Key 时，详情页会打开高德公开搜索地图。</p><div class="button-row"><button class="primary-button" @click="saveAmapKey">保存 Key</button></div></section><section class="settings-card" style="margin-top:14px"><h2 class="section-title">数据备份</h2><p class="hint">导出包含文字、照片和视频的 JSON 文件；视频较大时导出文件也会较大。</p><button class="secondary-button" @click="exportAll">导出全部房源 JSON</button><p v-if="notice" class="form-success" role="status">{{ notice }}</p></section></main>
+          <nav v-if="page !== 'detail'" class="tabbar" aria-label="主导航"><button :class="{active:page==='entry'}" @click="changePage('entry')">录入</button><button :class="{active:page==='list'}" @click="changePage('list')">房源列表</button><button :class="{active:page==='settings'}" @click="changePage('settings')">设置</button></nav>
+          <div v-if="mapOpen" class="modal-backdrop" role="dialog" aria-modal="true"><section class="modal"><div class="app-topbar" style="margin:0"><h2 style="margin:0;font-size:18px">房源位置</h2><button class="icon-button" @click="closeMap">关闭</button></div><div id="amap-container"></div><p class="hint">未填写地址或无法解析时，地图默认显示深圳市福田区石厦片区中心位置。</p></section></div>
+        `
+      };
+      Vue.createApp(PropertyToolApp).mount('#app');
+    </script>
+  </body>
+</html>
