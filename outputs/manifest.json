@@ -1,0 +1,25 @@
+{
+  "name": "房源记录与客户分析工具",
+  "short_name": "房源助手",
+  "description": "私密的房源记录与客户分析工具，数据仅保存在本机浏览器中。",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f8fafc",
+  "theme_color": "#0f766e",
+  "lang": "zh-CN",
+  "icons": [
+    {
+      "src": "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192'%3E%3Crect width='192' height='192' rx='42' fill='%230f766e'/%3E%3Cpath d='M43 83 96 39l53 44v69H43V83Zm24 47h58v22H67v-22Zm-3-43h64v30H64V87Z' fill='white'/%3E%3C/svg%3E",
+      "sizes": "192x192",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='112' fill='%230f766e'/%3E%3Cpath d='m115 221 141-117 141 117v184H115V221Zm64 125h154v59H179v-59Zm-8-115h170v80H171v-80Z' fill='white'/%3E%3C/svg%3E",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
