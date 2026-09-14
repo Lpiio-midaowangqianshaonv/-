@@ -3,7 +3,7 @@
  * 不会写入此缓存，也不会上传至任何服务器。
  */
 // Keep this suffix in sync with window.__APP_VERSION__ in index.html.
-const CACHE_NAME = 'property-record-shell-v1.0.0';
+const CACHE_NAME = 'property-record-shell-v1.1.0';
 const APP_SHELL = ['./', './index.html', './manifest.json'];
 const STATIC_PATHS = new Set(
   APP_SHELL.map((path) => new URL(path, self.registration.scope).pathname)

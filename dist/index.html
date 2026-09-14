@@ -106,9 +106,11 @@
 
     <!-- Vue 仅用于界面层；房源数据始终留在本机 IndexedDB。 -->
     <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+    <!-- 浏览器端仅加载 Supabase 的公开客户端；访问控制由数据库 RLS 负责。 -->
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script>
       // 更新缓存时同步更新此版本号，便于后续维护。
-      window.__APP_VERSION__ = '1.0.0';
+      window.__APP_VERSION__ = '1.1.0';
 
       // PWA 仅在安全上下文（HTTPS 或 localhost）中可以注册 Service Worker。
       if ('serviceWorker' in navigator) {
@@ -333,6 +335,159 @@
       window.createEmptyListing = () => normalizeListing({});
       window.Vue = window.Vue;
 
+      /** 团队协作客户端：配置只保存在当前浏览器，用户可随时退出或清除浏览器数据。 */
+      const TEAM_CONFIG_KEY = 'property-team-supabase-config';
+      let activeSupabaseClient = null;
+
+      function getTeamConfig() {
+        try { return JSON.parse(localStorage.getItem(TEAM_CONFIG_KEY) || '{}'); }
+        catch (_) { return {}; }
+      }
+
+      function saveTeamConfig(url, anonKey) {
+        const config = { url: String(url || '').trim().replace(/\/$/, ''), anonKey: String(anonKey || '').trim() };
+        if (!/^https:\/\//.test(config.url) || !config.anonKey) throw new Error('请填写有效的项目地址和公开客户端标识。');
+        localStorage.setItem(TEAM_CONFIG_KEY, JSON.stringify(config));
+        activeSupabaseClient = window.supabase.createClient(config.url, config.anonKey);
+        return activeSupabaseClient;
+      }
+
+      function getSupabaseClient() {
+        if (activeSupabaseClient) return activeSupabaseClient;
+        const config = getTeamConfig();
+        if (!config.url || !config.anonKey || !window.supabase?.createClient) return null;
+        activeSupabaseClient = window.supabase.createClient(config.url, config.anonKey);
+        return activeSupabaseClient;
+      }
+
+      function pendingInviteCode() {
+        return new URLSearchParams(location.search).get('invite')?.trim() || '';
+      }
+
+      async function signInWithEmail(email) {
+        const client = getSupabaseClient();
+        if (!client) throw new Error('请先保存 Supabase 项目配置。');
+        const cleanEmail = String(email || '').trim();
+        if (!/^\S+@\S+\.\S+$/.test(cleanEmail)) throw new Error('请输入有效邮箱地址。');
+        const invite = pendingInviteCode();
+        const redirectTo = `${location.origin}${location.pathname}${invite ? `?invite=${encodeURIComponent(invite)}` : ''}`;
+        const { error } = await client.auth.signInWithOtp({ email: cleanEmail, options: { emailRedirectTo: redirectTo } });
+        if (error) throw error;
+      }
+
+      async function createTeam(name) {
+        const client = getSupabaseClient();
+        if (!client) throw new Error('请先保存 Supabase 项目配置。');
+        const { data, error } = await client.rpc('create_team', { team_name: String(name || '').trim() });
+        if (error) throw error;
+        return data;
+      }
+
+      async function joinTeamFromInvite(code = pendingInviteCode()) {
+        const client = getSupabaseClient();
+        if (!client) throw new Error('请先保存 Supabase 项目配置。');
+        if (!code) throw new Error('未找到邀请链接。');
+        const { data, error } = await client.rpc('join_team_by_code', { code });
+        if (error) throw error;
+        return data;
+      }
+
+      async function rotateInvite(teamId) {
+        const client = getSupabaseClient();
+        if (!client) throw new Error('请先保存 Supabase 项目配置。');
+        const { data, error } = await client.rpc('rotate_invite_code', { target_team_id: teamId });
+        if (error) throw error;
+        return data;
+      }
+
+      async function getTeamSession() {
+        const client = getSupabaseClient();
+        if (!client) return null;
+        const { data, error } = await client.auth.getSession();
+        if (error) throw error;
+        return data.session;
+      }
+
+      async function listJoinedTeams() {
+        const client = getSupabaseClient();
+        if (!client) return [];
+        const { data, error } = await client.from('teams').select('*').order('created_at', { ascending: true });
+        if (error) throw error;
+        return data || [];
+      }
+
+      function propertyMediaPath(teamId, propertyId, mediaId) {
+        return `teams/${teamId}/properties/${propertyId}/${mediaId}`;
+      }
+
+      async function signedMediaUrl(path) {
+        const client = getSupabaseClient();
+        if (!client || !path) return '';
+        const { data, error } = await client.storage.from('property-media').createSignedUrl(path, 60 * 30);
+        if (error) throw error;
+        return data?.signedUrl || '';
+      }
+
+      async function syncProperty(listing, teamId) {
+        const client = getSupabaseClient();
+        if (!client || !teamId) throw new Error('请先登录并选择团队。');
+        const media = Array.isArray(listing.media) ? listing.media : [];
+        const cloudMedia = [];
+        for (const item of media) {
+          const path = propertyMediaPath(teamId, listing.id, item.id);
+          if (item.blob instanceof Blob) {
+            const { error } = await client.storage.from('property-media').upload(path, item.blob, {
+              contentType: item.type || item.blob.type || undefined, upsert: true
+            });
+            if (error) throw error;
+          }
+          cloudMedia.push({ id: item.id, kind: item.kind, name: item.name || '', type: item.type || '', path });
+        }
+        const { media: _media, ...payload } = listing;
+        const { error } = await client.from('properties').upsert({ id: listing.id, team_id: teamId, payload: { ...payload, cloudMedia } });
+        if (error) throw error;
+      }
+
+      async function loadTeamProperties(teamId) {
+        const client = getSupabaseClient();
+        if (!client || !teamId) return [];
+        const { data, error } = await client.from('properties').select('*').eq('team_id', teamId).order('updated_at', { ascending: false });
+        if (error) throw error;
+        return Promise.all((data || []).map(async (row) => {
+          const payload = row.payload || {};
+          const media = await Promise.all((payload.cloudMedia || []).map(async (item) => ({ ...item, previewUrl: await signedMediaUrl(item.path) })));
+          return { ...payload, id: row.id, teamId: row.team_id, updatedAt: row.updated_at, media };
+        }));
+      }
+
+      async function deleteTeamProperty(propertyId, teamId, media = []) {
+        const client = getSupabaseClient();
+        if (!client || !teamId) throw new Error('请先登录并选择团队。');
+        const paths = media.map((item) => item.path || propertyMediaPath(teamId, propertyId, item.id));
+        if (paths.length) {
+          const { error: storageError } = await client.storage.from('property-media').remove(paths);
+          if (storageError) throw storageError;
+        }
+        const { error } = await client.from('properties').delete().eq('id', propertyId).eq('team_id', teamId);
+        if (error) throw error;
+      }
+
+      function subscribeToTeamProperties(teamId, onChange) {
+        const client = getSupabaseClient();
+        if (!client || !teamId) return null;
+        return client.channel('team-properties-' + teamId)
+          .on('postgres_changes', { event: '*', schema: 'public', table: 'properties', filter: `team_id=eq.${teamId}` }, onChange)
+          .subscribe();
+      }
+
+      window.signInWithEmail = signInWithEmail;
+      window.createTeam = createTeam;
+      window.joinTeamFromInvite = joinTeamFromInvite;
+      window.rotateInvite = rotateInvite;
+      window.syncProperty = syncProperty;
+      window.loadTeamProperties = loadTeamProperties;
+      window.deleteTeamProperty = deleteTeamProperty;
+
       // Console smoke assertions; IndexedDB persistence needs a browser-origin runtime to exercise.
       const analysisSmoke = analyzeListing({ decoration: '精装', orientation: '南', area: 55, floor: '12/28', address: '石厦路' });
       console.assert(analysisSmoke.clients.includes('追求品质'), 'south-facing fine decoration should match quality clients');
@@ -403,10 +558,10 @@
             try {
               // 保存前重新计算，保证持久化的结果与当前表单内容一致。
               const currentAnalysis = analyzeListing(form);
-              await db.saveListing({ id: listingId.value, createdAt, ...form, analysis: currentAnalysis, media: media.value.map(({ id, kind, name, type, blob }) => ({ id, kind, name, type, blob })) });
+              const savedListing = await db.saveListing({ id: listingId.value, createdAt, ...form, analysis: currentAnalysis, media: media.value.map(({ id, kind, name, type, blob }) => ({ id, kind, name, type, blob })) });
               analysis.value = currentAnalysis;
               successMessage.value = '房源已安全保存到本机浏览器。';
-              emit('saved');
+              emit('saved', { ...savedListing, media: media.value.map(({ id, kind, name, type, blob }) => ({ id, kind, name, type, blob })) });
             } catch (error) {
               console.error(error);
               errorMessage.value = '保存失败，请检查浏览器是否允许本地存储，或清理部分空间后重试。';
@@ -462,7 +617,7 @@
       const PropertyToolApp = {
         components: { PropertyEntryApp },
         setup() {
-          const { ref, computed, nextTick, onBeforeUnmount } = Vue;
+          const { ref, computed, nextTick, onBeforeUnmount, onMounted } = Vue;
           const page = ref('entry');
           const listings = ref([]);
           const selected = ref(null);
@@ -470,9 +625,19 @@
           const loading = ref(false);
           const notice = ref('');
           const amapKey = ref(localStorage.getItem('property-amap-key') || '');
+          const teamConfig = ref(getTeamConfig());
+          const loginEmail = ref('');
+          const newTeamName = ref('');
+          const session = ref(null);
+          const teams = ref([]);
+          const activeTeam = ref(null);
+          const teamBusy = ref(false);
+          const teamMessage = ref('');
+          const teamError = ref('');
           const mapOpen = ref(false);
           let mapInstance = null;
           let mapScriptPromise = null;
+          let realtimeChannel = null;
           const mediaUrls = new Map();
 
           const filteredListings = computed(() => listings.value.filter((item) => {
@@ -483,29 +648,32 @@
           }));
           const layouts = computed(() => [...new Set(listings.value.map((item) => item.layout).filter(Boolean))]);
           function mediaUrl(record) {
+            if (record?.previewUrl) return record.previewUrl;
             if (!record?.blob) return '';
             if (!mediaUrls.has(record.id)) mediaUrls.set(record.id, URL.createObjectURL(record.blob));
             return mediaUrls.get(record.id);
           }
           // 将 IndexedDB 中的原始 Blob 下载回设备；不会经过网络。
-          function downloadMedia(record) {
-            if (!record?.blob) return;
-            const url = URL.createObjectURL(record.blob);
+          async function downloadMedia(record) {
+            let url = record?.previewUrl || '';
+            if (!url && record?.blob) url = URL.createObjectURL(record.blob);
+            if (!url && record?.path) url = await signedMediaUrl(record.path);
+            if (!url) return;
             const extension = record.type?.split('/')[1] || (record.kind === 'video' ? 'mp4' : 'jpg');
             const link = document.createElement('a');
             link.href = url;
             link.download = record.name || `房源${record.kind === 'video' ? '视频' : '照片'}-${Date.now()}.${extension}`;
             document.body.appendChild(link); link.click(); link.remove();
-            setTimeout(() => URL.revokeObjectURL(url), 1000);
+            if (record?.blob) setTimeout(() => URL.revokeObjectURL(url), 1000);
           }
           async function refreshListings() {
             loading.value = true;
-            try { listings.value = await db.listListings(); }
+            try { listings.value = activeTeam.value ? await loadTeamProperties(activeTeam.value.id) : await db.listListings(); }
             catch (error) { console.error(error); notice.value = '无法读取本机房源数据。'; }
             finally { loading.value = false; }
           }
           async function showDetail(id) {
-            try { selected.value = await db.getListing(id); page.value = 'detail'; }
+            try { selected.value = activeTeam.value ? listings.value.find((item) => item.id === id) : await db.getListing(id); page.value = 'detail'; }
             catch (error) { console.error(error); notice.value = '无法打开该房源详情。'; }
           }
           function changePage(nextPage) { page.value = nextPage; if (nextPage === 'list') refreshListings(); }
@@ -547,6 +715,88 @@
             } catch (error) { console.error(error); mapOpen.value = false; notice.value = '地图加载失败，已为您打开高德地图搜索。'; openPublicMap(); }
           }
           function closeMap() { if (mapInstance) { mapInstance.destroy(); mapInstance = null; } mapOpen.value = false; }
+          function inviteLink(team = activeTeam.value) {
+            return team?.invite_code ? `${location.origin}${location.pathname}?invite=${encodeURIComponent(team.invite_code)}` : '';
+          }
+          function clearTeamMessage() { teamMessage.value = ''; teamError.value = ''; }
+          async function refreshTeamState() {
+            session.value = await getTeamSession();
+            teams.value = session.value ? await listJoinedTeams() : [];
+            activeTeam.value = teams.value[0] || null;
+            const invite = pendingInviteCode();
+            if (session.value && invite && !teams.value.some((team) => team.invite_code === invite)) {
+              const joined = await joinTeamFromInvite(invite);
+              teams.value = await listJoinedTeams();
+              activeTeam.value = teams.value.find((team) => team.id === joined.id) || joined;
+              history.replaceState({}, '', location.pathname);
+              teamMessage.value = `已加入团队：${joined.name}`;
+            }
+            if (realtimeChannel) getSupabaseClient()?.removeChannel(realtimeChannel);
+            if (activeTeam.value) realtimeChannel = subscribeToTeamProperties(activeTeam.value.id, () => refreshListings());
+            await refreshListings();
+          }
+          async function saveTeamConnection() {
+            clearTeamMessage(); teamBusy.value = true;
+            try {
+              saveTeamConfig(teamConfig.value.url, teamConfig.value.anonKey);
+              await refreshTeamState();
+              teamMessage.value = '团队服务已连接。请用邮箱登录后创建或加入团队。';
+            } catch (error) { console.error(error); teamError.value = error.message || '无法连接团队服务。'; }
+            finally { teamBusy.value = false; }
+          }
+          async function requestEmailLogin() {
+            clearTeamMessage(); teamBusy.value = true;
+            try { await signInWithEmail(loginEmail.value); teamMessage.value = '登录链接已发送到邮箱，请在同一浏览器打开邮件中的链接。'; }
+            catch (error) { console.error(error); teamError.value = error.message || '登录链接发送失败。'; }
+            finally { teamBusy.value = false; }
+          }
+          async function makeTeam() {
+            clearTeamMessage(); teamBusy.value = true;
+            try {
+              const team = await createTeam(newTeamName.value);
+              teams.value = await listJoinedTeams(); activeTeam.value = teams.value.find((item) => item.id === team.id) || team;
+              newTeamName.value = ''; teamMessage.value = `团队“${team.name}”已创建。`;
+            } catch (error) { console.error(error); teamError.value = error.message || '创建团队失败。'; }
+            finally { teamBusy.value = false; }
+          }
+          async function joinPendingInvite() {
+            clearTeamMessage(); teamBusy.value = true;
+            try { await refreshTeamState(); if (!teamMessage.value) teamMessage.value = '当前邀请链接已处理。'; }
+            catch (error) { console.error(error); teamError.value = error.message || '加入团队失败。'; }
+            finally { teamBusy.value = false; }
+          }
+          async function renewInvite() {
+            if (!activeTeam.value) return;
+            clearTeamMessage(); teamBusy.value = true;
+            try {
+              const team = await rotateInvite(activeTeam.value.id);
+              teams.value = teams.value.map((item) => item.id === team.id ? team : item); activeTeam.value = team;
+              teamMessage.value = '已生成新邀请链接，旧链接立即失效。';
+            } catch (error) { console.error(error); teamError.value = error.message || '无法重新生成邀请链接。'; }
+            finally { teamBusy.value = false; }
+          }
+          async function handleListingSaved(listing) {
+            if (!activeTeam.value) { await refreshListings(); return; }
+            try {
+              await syncProperty(listing, activeTeam.value.id);
+              notice.value = '房源、照片和视频已同步给团队成员。';
+              await refreshListings();
+            } catch (error) { console.error(error); notice.value = `已保存到本机，但团队同步失败：${error.message || '请稍后重试'}`; }
+          }
+          async function removeSelectedTeamProperty() {
+            if (!activeTeam.value || !selected.value) return;
+            if (!confirm('删除后，所有团队成员将失去此房源及媒体。确定删除吗？')) return;
+            try {
+              await deleteTeamProperty(selected.value.id, activeTeam.value.id, selected.value.media || []);
+              await db.deleteListing(selected.value.id); selected.value = null; page.value = 'list';
+              notice.value = '团队房源及媒体已删除。'; await refreshListings();
+            } catch (error) { console.error(error); notice.value = `删除失败：${error.message || '请稍后重试'}`; }
+          }
+          async function copyInvite() {
+            const link = inviteLink(); if (!link) return;
+            try { await navigator.clipboard.writeText(link); teamMessage.value = '邀请链接已复制。'; }
+            catch (_) { teamError.value = '无法自动复制，请手动长按复制下方链接。'; }
+          }
           async function exportAll() {
             try {
               const [allListings, media] = await Promise.all([db.listListings(), db.listMedia()]);
@@ -557,18 +807,30 @@
               notice.value = `已导出 ${allListings.length} 套房源（含本地媒体）。`;
             } catch (error) { console.error(error); notice.value = '导出失败：请确认浏览器仍有足够本地存储空间。'; }
           }
-          onBeforeUnmount(() => { mediaUrls.forEach((url) => URL.revokeObjectURL(url)); if (mapInstance) mapInstance.destroy(); });
+          onMounted(() => { if (getSupabaseClient()) refreshTeamState().catch((error) => { teamError.value = error.message || '读取团队状态失败。'; }); });
+          onBeforeUnmount(() => { mediaUrls.forEach((url) => URL.revokeObjectURL(url)); if (mapInstance) mapInstance.destroy(); if (realtimeChannel) getSupabaseClient()?.removeChannel(realtimeChannel); });
           refreshListings();
-          return { page, listings, selected, filters, loading, notice, amapKey, mapOpen, filteredListings, layouts, changePage, showDetail, refreshListings, saveAmapKey, openMap, closeMap, exportAll, mediaUrl, downloadMedia };
+          return { page, listings, selected, filters, loading, notice, amapKey, mapOpen, filteredListings, layouts, changePage, showDetail, refreshListings, saveAmapKey, openMap, closeMap, exportAll, mediaUrl, downloadMedia, getSupabaseClient, teamConfig, loginEmail, newTeamName, session, teams, activeTeam, teamBusy, teamMessage, teamError, pendingInviteCode, inviteLink, saveTeamConnection, requestEmailLogin, makeTeam, joinPendingInvite, renewInvite, copyInvite, handleListingSaved, removeSelectedTeamProperty };
         },
         template: `
-          <property-entry-app v-if="page === 'entry'" @saved="refreshListings"></property-entry-app>
+          <property-entry-app v-if="page === 'entry'" @saved="handleListingSaved"></property-entry-app>
           <main v-else-if="page === 'list'" class="list-page"><header class="app-topbar"><h1>房源列表</h1><button class="text-button" @click="refreshListings">刷新</button></header>
             <section class="filter-panel" aria-label="筛选房源"><div class="filter-grid"><select v-model="filters.layout"><option value="">全部户型</option><option v-for="item in layouts" :key="item">{{ item }}</option></select><select v-model="filters.decoration"><option value="">全部装修</option><option>精装</option><option>简装</option><option>老旧</option></select></div><div class="rent-row"><input v-model="filters.rentMin" type="number" inputmode="numeric" min="0" placeholder="最低月租" /><span>至</span><input v-model="filters.rentMax" type="number" inputmode="numeric" min="0" placeholder="最高月租" /></div></section>
             <p v-if="notice" class="form-success" role="status">{{ notice }}</p><section v-if="filteredListings.length" class="listing-list"><button v-for="item in filteredListings" :key="item.id" class="listing-card" @click="showDetail(item.id)"><h2>{{ item.communityName }}</h2><div class="listing-meta"><span>{{ item.layout || '户型未填' }}</span><strong>¥{{ Number(item.rent || 0).toLocaleString() }}/月</strong><span class="chip">{{ item.decoration || '装修未填' }}</span></div><div v-if="item.analysis?.clients?.length" class="listing-meta"><span class="chip">{{ item.analysis.clients.join('、') }}</span></div></button></section><div v-else class="empty-state">{{ loading ? '正在读取本机数据…' : '暂无匹配房源，去录入第一套吧。' }}</div>
           </main>
-          <main v-else-if="page === 'detail'" class="detail-page"><header class="app-topbar"><button class="icon-button" @click="changePage('list')">‹ 返回</button><h1>房源详情</h1><span></span></header><template v-if="selected"><section class="detail-card"><h2 style="margin:0">{{ selected.communityName }}</h2><p class="hint">{{ selected.address || '未填写具体地址' }}</p><dl class="detail-grid"><div class="detail-item"><dt>户型</dt><dd>{{ selected.layout || '—' }}</dd></div><div class="detail-item"><dt>租金</dt><dd>¥{{ Number(selected.rent || 0).toLocaleString() }}/月</dd></div><div class="detail-item"><dt>面积</dt><dd>{{ selected.area || '—' }}㎡</dd></div><div class="detail-item"><dt>楼层 / 朝向</dt><dd>{{ selected.floor || '—' }} / {{ selected.orientation || '—' }}</dd></div><div class="detail-item"><dt>装修</dt><dd>{{ selected.decoration || '—' }}</dd></div><div class="detail-item"><dt>业主心理底价</dt><dd>{{ selected.ownerBottomPrice ? '¥' + Number(selected.ownerBottomPrice).toLocaleString() : '—' }}</dd></div></dl><div class="button-row" style="margin-top:14px"><button class="primary-button" @click="openMap">查看位置</button></div></section><section v-if="selected.analysis" class="detail-card"><h2 class="section-title">智能分析</h2><p><strong>综合评分：{{ selected.analysis.score }} 分</strong></p><p class="detail-text">推荐客户：{{ selected.analysis.clients?.join('、') || '—' }}</p><p v-if="selected.analysis.areaNote" class="detail-text">片区提示：{{ selected.analysis.areaNote }}</p><p class="detail-text">一句话卖点：{{ selected.analysis.advice }}</p></section><section class="detail-card"><h2 class="section-title">房源判断</h2><p class="detail-text"><strong>卖点：</strong>{{ selected.advantages || '—' }}</p><p class="detail-text"><strong>缺点：</strong>{{ selected.disadvantages || '—' }}</p><p class="detail-text"><strong>备注：</strong>{{ selected.notes || '—' }}</p><div v-if="selected.media?.length" class="detail-media"><template v-for="item in selected.media" :key="item.id"><img v-if="item.kind === 'image'" :src="mediaUrl(item)" :alt="item.name || '房源照片'" /><video v-else :src="mediaUrl(item)" controls playsinline></video><button class="secondary-button media-download" type="button" @click="downloadMedia(item)">保存{{ item.kind === 'video' ? '视频' : '照片' }}</button></template></div></section></template></main>
-          <main v-else class="settings-page"><header class="app-topbar"><h1>设置与备份</h1></header><section class="settings-card"><h2 class="section-title">高德地图 Key</h2><label>Web 端 JS API Key</label><input v-model="amapKey" autocomplete="off" placeholder="粘贴您申请的高德地图 Key" /><p class="hint">Key 只保存于当前浏览器。未填 Key 时，详情页会打开高德公开搜索地图。</p><div class="button-row"><button class="primary-button" @click="saveAmapKey">保存 Key</button></div></section><section class="settings-card" style="margin-top:14px"><h2 class="section-title">数据备份</h2><p class="hint">导出包含文字、照片和视频的 JSON 文件；视频较大时导出文件也会较大。</p><button class="secondary-button" @click="exportAll">导出全部房源 JSON</button><p v-if="notice" class="form-success" role="status">{{ notice }}</p></section></main>
+          <main v-else-if="page === 'detail'" class="detail-page"><header class="app-topbar"><button class="icon-button" @click="changePage('list')">‹ 返回</button><h1>房源详情</h1><span></span></header><template v-if="selected"><section class="detail-card"><h2 style="margin:0">{{ selected.communityName }}</h2><p class="hint">{{ selected.address || '未填写具体地址' }}</p><dl class="detail-grid"><div class="detail-item"><dt>户型</dt><dd>{{ selected.layout || '—' }}</dd></div><div class="detail-item"><dt>租金</dt><dd>¥{{ Number(selected.rent || 0).toLocaleString() }}/月</dd></div><div class="detail-item"><dt>面积</dt><dd>{{ selected.area || '—' }}㎡</dd></div><div class="detail-item"><dt>楼层 / 朝向</dt><dd>{{ selected.floor || '—' }} / {{ selected.orientation || '—' }}</dd></div><div class="detail-item"><dt>装修</dt><dd>{{ selected.decoration || '—' }}</dd></div><div class="detail-item"><dt>业主心理底价</dt><dd>{{ selected.ownerBottomPrice ? '¥' + Number(selected.ownerBottomPrice).toLocaleString() : '—' }}</dd></div></dl><div class="button-row" style="margin-top:14px"><button class="primary-button" @click="openMap">查看位置</button><button v-if="activeTeam" class="secondary-button" @click="removeSelectedTeamProperty">删除团队房源</button></div></section><section v-if="selected.analysis" class="detail-card"><h2 class="section-title">智能分析</h2><p><strong>综合评分：{{ selected.analysis.score }} 分</strong></p><p class="detail-text">推荐客户：{{ selected.analysis.clients?.join('、') || '—' }}</p><p v-if="selected.analysis.areaNote" class="detail-text">片区提示：{{ selected.analysis.areaNote }}</p><p class="detail-text">一句话卖点：{{ selected.analysis.advice }}</p></section><section class="detail-card"><h2 class="section-title">房源判断</h2><p class="detail-text"><strong>卖点：</strong>{{ selected.advantages || '—' }}</p><p class="detail-text"><strong>缺点：</strong>{{ selected.disadvantages || '—' }}</p><p class="detail-text"><strong>备注：</strong>{{ selected.notes || '—' }}</p><div v-if="selected.media?.length" class="detail-media"><template v-for="item in selected.media" :key="item.id"><img v-if="item.kind === 'image'" :src="mediaUrl(item)" :alt="item.name || '房源照片'" /><video v-else :src="mediaUrl(item)" controls playsinline></video><button class="secondary-button media-download" type="button" @click="downloadMedia(item)">保存{{ item.kind === 'video' ? '视频' : '照片' }}</button></template></div></section></template></main>
+          <main v-else class="settings-page"><header class="app-topbar"><h1>设置与备份</h1></header>
+            <section class="settings-card"><h2 class="section-title">团队协作</h2><p class="hint">启用后，团队房源、照片和视频将保存到你自己的 Supabase 项目；仅登录并加入团队的成员可访问。</p>
+              <div class="field"><label>项目地址</label><input v-model="teamConfig.url" inputmode="url" autocomplete="off" placeholder="https://xxxx.supabase.co" /></div>
+              <div class="field" style="margin-top:10px"><label>公开客户端标识</label><input v-model="teamConfig.anonKey" autocomplete="off" placeholder="从 Supabase API 设置复制" /></div>
+              <div class="button-row" style="margin-top:12px"><button class="primary-button" :disabled="teamBusy" @click="saveTeamConnection">保存并连接</button></div>
+              <template v-if="getSupabaseClient && session"><p class="form-success">已登录：{{ session.user.email }}</p><div v-if="pendingInviteCode()" class="button-row"><button class="secondary-button" :disabled="teamBusy" @click="joinPendingInvite">加入此邀请团队</button></div><div v-if="!activeTeam" class="field" style="margin-top:12px"><label>新团队名称</label><input v-model="newTeamName" placeholder="例如：福田租赁组" /><button class="primary-button" :disabled="teamBusy" style="margin-top:10px" @click="makeTeam">创建团队</button></div><template v-else><p class="detail-text"><strong>当前团队：</strong>{{ activeTeam.name }}</p><label>同事邀请链接</label><textarea readonly :value="inviteLink()" style="min-height:68px"></textarea><div class="button-row" style="margin-top:10px"><button class="secondary-button" @click="copyInvite">复制链接</button><button class="secondary-button" :disabled="teamBusy" @click="renewInvite">更新邀请链接</button></div><p class="hint">更新后，旧链接无法再加入；已加入的同事不受影响。</p></template></template>
+              <template v-else><div class="field" style="margin-top:12px"><label>登录邮箱</label><input v-model="loginEmail" type="email" inputmode="email" autocomplete="email" placeholder="name@example.com" /></div><div class="button-row" style="margin-top:10px"><button class="primary-button" :disabled="teamBusy" @click="requestEmailLogin">发送登录链接</button></div><p class="hint">先保存并连接，再用邮箱登录。请在同一浏览器打开邮件中的登录链接。</p></template>
+              <p v-if="teamError" class="form-error" role="alert">{{ teamError }}</p><p v-if="teamMessage" class="form-success" role="status">{{ teamMessage }}</p>
+            </section>
+            <section class="settings-card" style="margin-top:14px"><h2 class="section-title">高德地图 Key</h2><label>Web 端 JS API Key</label><input v-model="amapKey" autocomplete="off" placeholder="粘贴您申请的高德地图 Key" /><p class="hint">Key 只保存于当前浏览器。未填 Key 时，详情页会打开高德公开搜索地图。</p><div class="button-row"><button class="primary-button" @click="saveAmapKey">保存 Key</button></div></section>
+            <section class="settings-card" style="margin-top:14px"><h2 class="section-title">数据备份</h2><p class="hint">导出包含文字、照片和视频的 JSON 文件；视频较大时导出文件也会较大。</p><button class="secondary-button" @click="exportAll">导出全部房源 JSON</button><p v-if="notice" class="form-success" role="status">{{ notice }}</p></section>
+          </main>
           <nav v-if="page !== 'detail'" class="tabbar" aria-label="主导航"><button :class="{active:page==='entry'}" @click="changePage('entry')">录入</button><button :class="{active:page==='list'}" @click="changePage('list')">房源列表</button><button :class="{active:page==='settings'}" @click="changePage('settings')">设置</button></nav>
           <div v-if="mapOpen" class="modal-backdrop" role="dialog" aria-modal="true"><section class="modal"><div class="app-topbar" style="margin:0"><h2 style="margin:0;font-size:18px">房源位置</h2><button class="icon-button" @click="closeMap">关闭</button></div><div id="amap-container"></div><p class="hint">未填写地址或无法解析时，地图默认显示深圳市福田区石厦片区中心位置。</p></section></div>
         `
